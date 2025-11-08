@@ -20,7 +20,6 @@
       "label": "Run UAV Evalution",     
       "type": "shell",                 
       "command": "conda activate UAV_Navigation; cd ./scripts/; python evaluation.py",  
-      // ctrl + shift + b to run
       "group": {
         "kind": "build",
         "isDefault": false
