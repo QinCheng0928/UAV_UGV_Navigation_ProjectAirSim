@@ -3,3 +3,5 @@
 */projectairsim_client.log
 
 tensorboard_log/ppo/
+
+**/media/
