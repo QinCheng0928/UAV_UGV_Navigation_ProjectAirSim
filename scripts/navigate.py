@@ -10,13 +10,17 @@ from projectairsim.drone import YawControlMode
 from projectairsim.types import ImageType
 from projectairsim.image_utils import ImageDisplay
 
-
-def save_and_receive(topic, msg):
-    pass
+subwin_width, subwin_height = 640, 360
 
 async def main():
     client = ProjectAirSimClient()
-    image_display = ImageDisplay()
+    image_display = ImageDisplay(
+        num_subwin=3,
+        screen_res_x=2560,
+        screen_res_y=1440,
+        subwin_width=subwin_width,
+        subwin_height=subwin_height
+    )
     
     try:
         client.connect()
@@ -24,21 +28,21 @@ async def main():
         drone = Drone(client, world, "Drone1")
 
         chase_cam_window = "ChaseCam"
-        image_display.add_chase_cam(chase_cam_window)
+        image_display.add_image(chase_cam_window, subwin_idx=0, resize_x=subwin_width, resize_y=subwin_height) 
         client.subscribe(
             drone.sensors["Chase"]["scene_camera"],
             lambda _, chase: image_display.receive(chase, chase_cam_window),
         )
 
         front_cam_window = "FrontCam"
-        image_display.add_chase_cam(front_cam_window)
+        image_display.add_image(front_cam_window,  subwin_idx=1, resize_x=subwin_width, resize_y=subwin_height)
         client.subscribe(
             drone.sensors["FrontCamera"]["scene_camera"],
             lambda _, chase: image_display.receive(chase, front_cam_window),
         )
 
         depth_name = "Depth-Image"
-        image_display.add_image(depth_name, subwin_idx=0)
+        image_display.add_image(depth_name, subwin_idx=2, resize_x=subwin_width, resize_y=subwin_height)
         client.subscribe(
             drone.sensors["front_center"]["depth_planar_camera"],
             lambda _, depth: image_display.receive(depth, depth_name),
