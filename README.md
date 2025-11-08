@@ -22,8 +22,9 @@ Project AirSim consists of three main layers:
 ## 🚀 Project Objective
 
 **Stage 1 **：**[DONE]** Implementation of rule-based obstacle avoidance algorithm for unmanned aerial vehicles  
-**Stage 2 **：**[TODO]** Implement DRL based autonomous navigation and obstacle avoidance algorithm for unmanned aerial vehicles   
-**Stage 3 **：**[TODO]** Expand multi-agent scenarios to achieve collaborative simulation and task allocation between drones and ground vehicles 
+**Stage 2 **：**[TODO]** Implement DRL based autonomous navigation and obstacle avoidance algorithm for UAV  
+**Stage 3 **：**[TODO]** Implement DRL based autonomous navigation and obstacle avoidance algorithm for UGV    
+**Stage 4 **：**[TODO]** Expand multi-agent scenarios to achieve collaborative simulation and task allocation between drones and ground vehicles 
 
 ## 🧩 Repository Structure
 ```
