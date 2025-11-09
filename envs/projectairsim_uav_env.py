@@ -1,11 +1,20 @@
+import math
 import numpy as np
-from gymnasium import gym
+import gymnasium as gym
 from gymnasium import spaces
 
 import asyncio
 from projectairsim import ProjectAirSimClient, Drone, World
 from projectairsim.image_utils import ImageDisplay, unpack_image
-from projectairsim.utils import load_scene_config_as_dict
+from projectairsim.types import ImageType
+from projectairsim.utils import (
+    load_scene_config_as_dict, 
+    quaternion_to_rpy, 
+    )
+from envs.utils.type import (
+    ActionType,
+    State,
+    )
 
 class ProjectAirSimSmallCityEnv(gym.Env):
     subwin_width, subwin_height = 640, 360
@@ -14,7 +23,8 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         super().__init__()
         self.sim_config_filename = "scene_drone_classic.jsonc"
 
-        self.dv = 1.0
+        self.dv = 0.5
+        self.maxv = 5
         self.current_step = 0 
         self.max_episode_steps = 500
         self.target_point = self.random_target_point()
@@ -27,6 +37,11 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.client.connect()
         self.world = World(self.client, self.sim_config_fname)
         self.drone = Drone(self.client, self.world, "Drone1")
+
+        self.client.subscribe(
+            self.drone.robot_info["collision_info"],
+            self._collision_callback,
+        )
 
         # Init the image display windows
         self.image_display = ImageDisplay(
@@ -57,19 +72,23 @@ class ProjectAirSimSmallCityEnv(gym.Env):
             lambda _, msg: self.image_display.receive(msg, chase_cam_window),
         )
 
-        # relative_yaw = yaw − goal_yaw
-        # vx = 0
-        # vy = 1
-        # vz = 2
-        # dis_x = 3
-        # dis_y = 4
-        # dis_z = 5
-        # relative_yaw = 6
-        # angular_velocity = 7
-        # collision = 8
+        # 
+        # 0 = vx
+        # 1 = vy
+        # 2 = vz
+        # 3 = dis_x
+        # 4 = dis_y 
+        # 5 = dis_z
+        # 6 = relative_yaw       (relative_yaw = yaw − goal_yaw)
+        # 7 = angular_velocity
+        # 8 = collision
         self.state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, False]
         assert len(self.state) == 9
         self.update_state()
+
+        self.distance_x = self.state[State.dis_x]
+        self.distance_y = self.state[State.dis_y]
+        self.distance_z = self.state[State.dis_z]
 
         # The speed variation of North East Down South West Up and BRAKE
         self.action_space = gym.spaces.Discrete(7)  
@@ -87,6 +106,9 @@ class ProjectAirSimSmallCityEnv(gym.Env):
             shape=(1, 8 + 8),
             dtype=np.float32
             )
+        
+        self.drone.enable_api_control()
+        self.drone.arm()
 
     """
         The reset() method must return a tuple (obs, info) 
@@ -127,9 +149,14 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.current_step = 0 
         self.target_point = self.random_target_point()
         self.update_state()
+        self.distance_x = self.state[State.dis_x]
+        self.distance_y = self.state[State.dis_y]
+        self.distance_z = self.state[State.dis_z]
 
-        # TODO: Return to observation and info
-        obs = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+        self.drone.enable_api_control()
+        self.drone.arm()
+
+        obs = self.get_observation()
         info = {}
         return (obs, info)
 
@@ -137,37 +164,140 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         The step() method must return five values: (obs, reward, terminated, truncated, info).  
     """
     def step(self, action):
-        # TODO step once
-        obs = np.array([0.0, 0.0, 0.0], dtype=np.float32)
-        if action == 0:
-            reward = 1
-        else:
-            reward = -1
-        terminated = False  
-        truncated = False
+        self.current_step += 1
+        
+        self.loop.run_until_complete(self._simulate(action))
+        
+        obs = self.get_observation()
+        reward = self.get_reward()
+        done = self._is_terminal()
+        truncated = self._is_truncated()
         info = {}
-        return (obs, reward, terminated, truncated, info)
+        return (obs, reward, done, truncated, info)
     
+    async def _simulate(self, action):
+        action = int(action)
+        print(f"Action taken: {ActionType.NUM2NAME[action]}")
+        
+        curr_velocity = self.state["velocity"] * 0.9
+        vx = float(curr_velocity[0])
+        vy = float(curr_velocity[1])
+        vz = float(curr_velocity[2])
+        
+        # update velocity based on action
+        if action == ActionType.NORTH:
+            vx += self.dv
+        elif action == ActionType.EAST:
+            vy += self.dv
+        elif action == ActionType.DOWN:
+            vz += self.dv
+        elif action == ActionType.SOUTH:
+            vx -= self.dv
+        elif action == ActionType.WEST:
+            vy -= self.dv
+        elif action == ActionType.UP:
+            vz -= self.dv
+        elif action == ActionType.BRAKE:
+            vx *= 0.5
+            vy *= 0.5
+            vz *= 0.5
+
+        vx = np.clip(vx, -self.maxv, self.maxv)
+        vy = np.clip(vy, -self.maxv, self.maxv)
+        vz = np.clip(vz, -self.maxv, self.maxv)
+
+        if self._has_arrived():
+            vx = 0.0
+            vy = 0.0
+            vz = 0.0
+        
+        print(f"Velocity command: vx={vx}, vy={vy}, vz={vz}")
+        
+        # send velocity command to the drone
+        move_up_task = await self.drone.move_by_velocity_async(v_north=vx, v_east=vy, v_down=vz, duration=0.5)
+        await move_up_task     
+
+
+    def get_observation(self):
+        # Remove collision tag and Normalizing [low=0, high=255]
+        state_feature = self.normalize_state()
+
+        # Obtain and ormalizing depth image
+        result = self.drone.get_images("front_center", [ImageType.DEPTH_PLANAR])
+        depth_image = unpack_image(result[ImageType.DEPTH_PLANAR])
+        image_feature = self.normalize_image(depth_image)
+
+        assert state_feature.shape[0] == 1 and state_feature.shape[1] == 8 
+        assert image_feature.shape[0] == 1 and image_feature.shape[1] == 8 
+
+        return np.concatenate((image_feature, state_feature), axis=0)
+
+    def update_state(self):
+        state = self.drone.get_ground_truth_kinematics()
+
+        self.state[State.vx] = state["twist"]["linear"]["x"]
+        self.state[State.vy] = state["twist"]["linear"]["y"]
+        self.state[State.vz] = state["twist"]["linear"]["z"]
+        self.state[State.dis_x] = abs(state["pose"]["position"]["x"] - self.target_point[0])
+        self.state[State.dis_y] = abs(state["pose"]["position"]["y"] - self.target_point[1])
+        self.state[State.dis_z] = abs(state["pose"]["position"]["z"] - self.target_point[2])
+
+        # relative_yaw = yaw − goal_yaw
+        # [-pi, pi)
+        orientation = state["pose"]["orientation"]
+        pitch, roll, yaw = quaternion_to_rpy(orientation["w"], orientation["x"], orientation["y"], orientation["z"])
+        goal_yaw = math.atan2(self.target_point[1] - state["pose"]["position"]["y"], self.target_point[0] - state["pose"]["position"]["x"])
+        angle = yaw - goal_yaw
+        self.state[State.relative_yaw] = (angle + math.pi) % (2*math.pi) - math.pi
+        
+        self.state[State.angular_velocity] = state["twist"]["linear"]["z"]
+
     # ==================================================
     # utils functions
     # ==================================================
-    def _has_arrived(self):
-        return self.distance_3d(np.array[self.state["x"], self.state["y"], self.state["z"]], self.target_point) < self.goal_distance_threshold
 
-    def _is_terminal(self):
-        return bool((self.collision or self._has_arrived()))
+    def normalize_state(self):
+        vx_norm = (self.state[State.vx] / self.maxv / 2 + 0.5) * 255
+        vy_norm = (self.state[State.vy] / self.maxv / 2 + 0.5) * 255
+        vz_norm = (self.state[State.vz] / self.maxv / 2 + 0.5) * 255
 
-    def _is_truncated(self):
-        return self.sim_step >= self.max_sim_steps    
+        dis_x_norm = (self.state[State.dis_x] / self.distance_x / 2 + 0.5) * 255
+        dis_y_norm = (self.state[State.dis_y] / self.distance_y / 2 + 0.5) * 255
+        dis_z_norm = (self.state[State.dis_z] / self.distance_z / 2 + 0.5) * 255
 
-    def update_state():
-        # TODO update state
-        pass
+        angular_velocity_norm = (self.state[State.angular_velocity] / 2 / 2 + 0.5) * 255
+
+        relative_yaw_norm = (self.state[State.relative_yaw] / math.pi / 2 + 0.5) * 255
+
+        return [[vx_norm, vy_norm, vz_norm, dis_x_norm, dis_y_norm, dis_z_norm, relative_yaw_norm, angular_velocity_norm]]
+
+    def normalize_image(self, depth_image):
+        image_scaled = np.clip(depth_image, 0, 15) / 15 * 255
+        image_scaled = 255 - image_scaled
+        image_uint8 = image_scaled.astype(np.uint8)
+        # Extract features [low=0, high=255]
+        middle = np.vsplit(image_uint8, 3)[1]
+        bands = np.hsplit(middle, 8)
+        split_image = []
+        for i in range(8):
+            split_image.append(bands[i].max())
+        return np.array(split_image)
 
     def random_target_point(self):
         # TODO Determine several feasible endpoints
         return [0.0, 0.0, 0.0]
-        
+
+    def _has_arrived(self):
+        return self.distance_3d(np.array[self.state["x"], self.state["y"], self.state["z"]], self.target_point) < self.goal_distance_threshold
+
+    def _is_terminal(self):
+        return bool((self.state[State.collision] or self._has_arrived()))
+
+    def _is_truncated(self):
+        return self.current_step >= self.max_episode_steps    
+
+    def _collision_callback(self):
+        self.state[State.collision] = True
 
     def distance_3d(self, p1, p2):
         p1 = np.array(p1, dtype=float)

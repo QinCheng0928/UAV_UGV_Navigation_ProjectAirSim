@@ -9,16 +9,14 @@ from envs.projectairsim_uav_env import ProjectAirSimSmallCityEnv
 
 def main():
     env = ProjectAirSimSmallCityEnv()
-    
-    model_name = "ppo_smallcity_20251030_202615.zip"
-    model = PPO.load(os.path.join(MODULE_DIR, model_name))
+
+    model = None
     
     for _ in range(5):
         obs, info = env.reset()
         done = truncated = False
         while not (done or truncated):
-            action, _ = model.predict(obs)
-            print(action)
+            action = 1
             obs, reward, done, truncated, info = env.step(action)
 
 if __name__ == "__main__":

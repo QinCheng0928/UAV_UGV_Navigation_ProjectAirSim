@@ -102,9 +102,9 @@ async def main():
 
             # slice the image so we only check what we are headed into (and not what is down on the ground below us).
 
-            top = np.vsplit(depth_image, 3)[1]
+            middle = np.vsplit(depth_image, 3)[1]
 
-            bands = np.hsplit(top, num_segments)
+            bands = np.hsplit(middle, num_segments)
             mins = [np.min(x) for x in bands]
             projectairsim_log().info(mins)
             max = np.argmax(mins)    
