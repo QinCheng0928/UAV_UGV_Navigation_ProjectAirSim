@@ -35,12 +35,12 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         # init the sim world and drone
         self.client = ProjectAirSimClient()
         self.client.connect()
-        self.world = World(self.client, self.sim_config_fname)
+        self.world = World(self.client, self.sim_config_filename)
         self.drone = Drone(self.client, self.world, "Drone1")
 
         self.client.subscribe(
             self.drone.robot_info["collision_info"],
-            self._collision_callback,
+            lambda topic, msg: self._collision_callback,
         )
 
         # Init the image display windows
@@ -116,7 +116,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
     def reset(self, *, seed=None, options=None):
         # reset the world and drone
         config_loaded, _ = load_scene_config_as_dict(
-            self.sim_config_fname, 
+            self.sim_config_filename, 
             sim_config_path="sim_config/", 
             sim_instance_idx=-1
         )
@@ -156,7 +156,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.drone.enable_api_control()
         self.drone.arm()
 
-        obs = self.get_observation()
+        obs = self._get_obs()
         info = {}
         return (obs, info)
 
@@ -168,8 +168,8 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         
         self.loop.run_until_complete(self._simulate(action))
         
-        obs = self.get_observation()
-        reward = self.get_reward()
+        obs = self._get_obs()
+        reward = self._rewards()
         done = self._is_terminal()
         truncated = self._is_truncated()
         info = {}
@@ -179,10 +179,9 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         action = int(action)
         print(f"Action taken: {ActionType.NUM2NAME[action]}")
         
-        curr_velocity = self.state["velocity"] * 0.9
-        vx = float(curr_velocity[0])
-        vy = float(curr_velocity[1])
-        vz = float(curr_velocity[2])
+        vx = float(self.state[State.vx]) * 0.9
+        vy = float(self.state[State.vy]) * 0.9
+        vz = float(self.state[State.vz]) * 0.9
         
         # update velocity based on action
         if action == ActionType.NORTH:
@@ -218,19 +217,25 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         await move_up_task     
 
 
-    def get_observation(self):
+    def _get_obs(self):
         # Remove collision tag and Normalizing [low=0, high=255]
         state_feature = self.normalize_state()
 
         # Obtain and ormalizing depth image
         result = self.drone.get_images("front_center", [ImageType.DEPTH_PLANAR])
         depth_image = unpack_image(result[ImageType.DEPTH_PLANAR])
+        if depth_image.ndim == 3:
+            depth_image = depth_image[:, :, 0]
         image_feature = self.normalize_image(depth_image)
 
         assert state_feature.shape[0] == 1 and state_feature.shape[1] == 8 
         assert image_feature.shape[0] == 1 and image_feature.shape[1] == 8 
 
         return np.concatenate((image_feature, state_feature), axis=0)
+
+    def _rewards(self):
+        # TODO
+        pass
 
     def update_state(self):
         state = self.drone.get_ground_truth_kinematics()
@@ -269,7 +274,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
 
         relative_yaw_norm = (self.state[State.relative_yaw] / math.pi / 2 + 0.5) * 255
 
-        return [[vx_norm, vy_norm, vz_norm, dis_x_norm, dis_y_norm, dis_z_norm, relative_yaw_norm, angular_velocity_norm]]
+        return np.array([[vx_norm, vy_norm, vz_norm, dis_x_norm, dis_y_norm, dis_z_norm, relative_yaw_norm, angular_velocity_norm]])
 
     def normalize_image(self, depth_image):
         image_scaled = np.clip(depth_image, 0, 15) / 15 * 255
@@ -281,14 +286,17 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         split_image = []
         for i in range(8):
             split_image.append(bands[i].max())
-        return np.array(split_image)
+        return np.array([split_image])
 
     def random_target_point(self):
         # TODO Determine several feasible endpoints
-        return [0.0, 0.0, 0.0]
+        return [7.0, 7.0, 7.0]
 
     def _has_arrived(self):
-        return self.distance_3d(np.array[self.state["x"], self.state["y"], self.state["z"]], self.target_point) < self.goal_distance_threshold
+        return self.distance_3d(
+            np.array([self.state[State.vx], self.state[State.vy], self.state[State.vz]]),
+            self.target_point
+        ) < self.goal_distance_threshold
 
     def _is_terminal(self):
         return bool((self.state[State.collision] or self._has_arrived()))
