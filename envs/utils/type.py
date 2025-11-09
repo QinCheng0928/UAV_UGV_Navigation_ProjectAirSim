@@ -17,3 +17,14 @@ class ActionType:
         UP: "Up (-Z)",
         BRAKE: "Brake"
     }
+
+class State:
+    vx = 0
+    vy = 1
+    vz = 2
+    dis_x = 3
+    dis_y = 4
+    dis_z = 5
+    relative_yaw = 6
+    angular_velocity = 7
+    collision = 8
