@@ -128,6 +128,8 @@ async def main():
 
             move_task = await drone.move_by_velocity_z_async(vx, vy,-6, 1, YawControlMode.ForwardOnly, yaw=0, yaw_is_rate=False)
             await move_task
+            kinematics = drone.get_ground_truth_kinematics()
+            print(f"Initial kinematics: {kinematics}")
 
     finally:
         image_display.stop()

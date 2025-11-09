@@ -40,7 +40,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
 
         self.client.subscribe(
             self.drone.robot_info["collision_info"],
-            lambda topic, msg: self._collision_callback,
+            self._collision_callback,
         )
 
         # Init the image display windows
@@ -62,14 +62,14 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.image_display.add_image(front_cam_window,  subwin_idx=1, resize_x=self.subwin_width, resize_y=self.subwin_height)
         self.client.subscribe(
             self.drone.sensors["FrontCamera"]["scene_camera"],
-            lambda _, msg: self.image_display.receive(msg, chase_cam_window),
+            lambda _, msg: self.image_display.receive(msg, front_cam_window),
         )
 
         depth_name = "DepthImage"
         self.image_display.add_image(depth_name, subwin_idx=2, resize_x=self.subwin_width, resize_y=self.subwin_height)
         self.client.subscribe(
             self.drone.sensors["front_center"]["depth_planar_camera"],
-            lambda _, msg: self.image_display.receive(msg, chase_cam_window),
+            lambda _, msg: self.image_display.receive(msg, depth_name),
         )
 
         # 
@@ -89,6 +89,9 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.distance_x = self.state[State.dis_x]
         self.distance_y = self.state[State.dis_y]
         self.distance_z = self.state[State.dis_z]
+        self.total_dis = math.sqrt(self.distance_x **2 + self.distance_y **2 + self.distance_z **2)
+        self.previous_distance = self.total_dis
+        self.cur_distance = self.total_dis
 
         # The speed variation of North East Down South West Up and BRAKE
         self.action_space = gym.spaces.Discrete(7)  
@@ -100,12 +103,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         # We also choose velocity in 3D space (vx vy, vz), distance from the endpoint (dis_x, dis_y, dis_z), 
         # relative heading angle, and angular velocity as features of the state
         # The shape is (1, 8)
-        self.observation_space = spaces.Box(
-            low=0, 
-            high=1,
-            shape=(1, 8 + 8),
-            dtype=np.float32
-            )
+        self.observation_space = spaces.Box(low=0.0, high=255.0, shape=(16,), dtype=np.float32)
         
         self.drone.enable_api_control()
         self.drone.arm()
@@ -135,14 +133,14 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.image_display.add_image(front_cam_window,  subwin_idx=1, resize_x=self.subwin_width, resize_y=self.subwin_height)
         self.client.subscribe(
             self.drone.sensors["FrontCamera"]["scene_camera"],
-            lambda _, msg: self.image_display.receive(msg, chase_cam_window),
+            lambda _, msg: self.image_display.receive(msg, front_cam_window),
         )
 
         depth_name = "DepthImage"
         self.image_display.add_image(depth_name, subwin_idx=2, resize_x=self.subwin_width, resize_y=self.subwin_height)
         self.client.subscribe(
             self.drone.sensors["front_center"]["depth_planar_camera"],
-            lambda _, msg: self.image_display.receive(msg, chase_cam_window),
+            lambda _, msg: self.image_display.receive(msg, depth_name),
         )
 
         # reset state variables
@@ -152,6 +150,9 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.distance_x = self.state[State.dis_x]
         self.distance_y = self.state[State.dis_y]
         self.distance_z = self.state[State.dis_z]
+        self.total_dis = math.sqrt(self.distance_x **2 + self.distance_y **2 + self.distance_z **2)
+        self.previous_distance = self.total_dis
+        self.cur_distance = self.total_dis
 
         self.drone.enable_api_control()
         self.drone.arm()
@@ -167,6 +168,8 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.current_step += 1
         
         self.loop.run_until_complete(self._simulate(action))
+        self.previous_distance = self.cur_distance
+        self.cur_distance = math.sqrt(self.state[State.dis_x] **2 + self.state[State.dis_y] **2 + self.state[State.dis_z] **2)
         
         obs = self._get_obs()
         reward = self._rewards()
@@ -216,6 +219,8 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         move_up_task = await self.drone.move_by_velocity_async(v_north=vx, v_east=vy, v_down=vz, duration=0.5)
         await move_up_task     
 
+        self.update_state()
+
 
     def _get_obs(self):
         # Remove collision tag and Normalizing [low=0, high=255]
@@ -231,11 +236,44 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         assert state_feature.shape[0] == 1 and state_feature.shape[1] == 8 
         assert image_feature.shape[0] == 1 and image_feature.shape[1] == 8 
 
-        return np.concatenate((image_feature, state_feature), axis=0)
-
+        combined = np.concatenate((image_feature.flatten(), state_feature.flatten())) 
+        return combined.flatten().astype(np.float32)
+    
     def _rewards(self):
         # TODO
-        pass
+        arrive_reward = 10.0
+        crash_penalty = -20.0
+
+        k_d = 5.0    # distance progress coef
+        k_y = 0.5    # yaw error coef
+        k_a = 0.1    # action/ang vel coef
+        k_o = 2.0    # obstacle proximity coef
+
+        # positive if moved closer
+        reward_dist = k_d * (self.previous_distance - self.cur_distance) / max(self.total_dis, 1e-6)
+
+        # yaw error cost
+        yaw_err = self.state[State.relative_yaw]
+        reward_yaw = - k_y * (abs(yaw_err) / math.pi)  # in [-k_y, 0]
+
+        # angular velocity cost
+        ang_vel = self.state[State.angular_velocity]
+        reward_act = - k_a * (abs(ang_vel) / math.pi)
+
+
+        # aggregate (dense part)
+        reward = reward_dist + reward_yaw + reward_act
+
+        # collision flag
+        if self.state[State.collision]:
+            return crash_penalty
+
+        # arrived
+        if self._has_arrived():
+            return arrive_reward
+
+        return float(reward)
+
 
     def update_state(self):
         state = self.drone.get_ground_truth_kinematics()
@@ -255,7 +293,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         angle = yaw - goal_yaw
         self.state[State.relative_yaw] = (angle + math.pi) % (2*math.pi) - math.pi
         
-        self.state[State.angular_velocity] = state["twist"]["linear"]["z"]
+        self.state[State.angular_velocity] = state["twist"]["angular"]["z"]
 
     # ==================================================
     # utils functions
@@ -270,9 +308,9 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         dis_y_norm = (self.state[State.dis_y] / self.distance_y / 2 + 0.5) * 255
         dis_z_norm = (self.state[State.dis_z] / self.distance_z / 2 + 0.5) * 255
 
-        angular_velocity_norm = (self.state[State.angular_velocity] / 2 / 2 + 0.5) * 255
-
         relative_yaw_norm = (self.state[State.relative_yaw] / math.pi / 2 + 0.5) * 255
+
+        angular_velocity_norm = (self.state[State.angular_velocity] / math.pi / 2 + 0.5) * 255
 
         return np.array([[vx_norm, vy_norm, vz_norm, dis_x_norm, dis_y_norm, dis_z_norm, relative_yaw_norm, angular_velocity_norm]])
 
@@ -283,20 +321,16 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         # Extract features [low=0, high=255]
         middle = np.vsplit(image_uint8, 3)[1]
         bands = np.hsplit(middle, 8)
-        split_image = []
-        for i in range(8):
-            split_image.append(bands[i].max())
-        return np.array([split_image])
+        split_image = [b.max() for b in bands]
+        return np.array([split_image], dtype=np.float32)
 
     def random_target_point(self):
         # TODO Determine several feasible endpoints
         return [7.0, 7.0, 7.0]
 
     def _has_arrived(self):
-        return self.distance_3d(
-            np.array([self.state[State.vx], self.state[State.vy], self.state[State.vz]]),
-            self.target_point
-        ) < self.goal_distance_threshold
+        return math.sqrt(self.state[State.dis_x] ** 2 + self.state[State.dis_y] ** 2 + self.state[State.dis_z] ** 2) < self.goal_distance_threshold
+
 
     def _is_terminal(self):
         return bool((self.state[State.collision] or self._has_arrived()))
@@ -304,10 +338,14 @@ class ProjectAirSimSmallCityEnv(gym.Env):
     def _is_truncated(self):
         return self.current_step >= self.max_episode_steps    
 
-    def _collision_callback(self):
+    def _collision_callback(self, topic=None, msg=None):
         self.state[State.collision] = True
 
     def distance_3d(self, p1, p2):
         p1 = np.array(p1, dtype=float)
         p2 = np.array(p2, dtype=float)
         return np.linalg.norm(p1 - p2)
+    
+    def close(self):
+        self.client.disconnect()
+        self.image_display.stop()
