@@ -598,6 +598,45 @@
       // Config for simple discharge model. The drain rate can be adjusted at runtime using client api calls.
       // "battery-mode":"simple-discharge-mode",
       // "battery-drain-rate-on-start": 1
+    },
+    {
+      "id": "FrontCamera",
+      "type": "camera",
+      "enabled": true,
+      "parent-link": "Frame",
+      "capture-interval": 0.03,
+      "capture-settings": [
+        {
+          "image-type": 0,
+          "width": 1280,
+          "height": 720,
+          "fov-degrees": 90,
+          "capture-enabled": true,
+          "streaming-enabled": true,
+          "pixels-as-float": false,
+          "compress": false,
+          "target-gamma": 2.5
+        },
+        {
+          "image-type": 2,
+          "width": 1280,
+          "height": 720,
+          "fov-degrees": 90,
+          "capture-enabled": true,
+          "streaming-enabled": false,
+          "pixels-as-float": true,
+          "compress": false
+        }
+      ],
+      "gimbal": {
+        "lock-roll": true,
+        "lock-pitch": false,
+        "lock-yaw": false
+      },
+      "origin": {
+        "xyz": "0.30 0.0 0.0",
+        "rpy-deg": "0 0 0"
+      }
     }
   ]
 }

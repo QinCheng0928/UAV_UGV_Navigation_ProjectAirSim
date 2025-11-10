@@ -1,4 +1,5 @@
 import math
+import random
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -30,11 +31,13 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.target_point = self.random_target_point()
         self.goal_distance_threshold = 10.0
 
+        random.seed(42)
+        np.random.seed(42)
+
         self.loop = asyncio.get_event_loop()
 
         self.client = ProjectAirSimClient()
         self.client.connect()
-        self.world = World(self.client, self.sim_config_filename)
 
         self.image_display = ImageDisplay(
             num_subwin=3,
@@ -82,6 +85,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
     """
     def reset(self, *, seed=None, options=None):
         # reset the sim world and drone
+        self.world = World(self.client, self.sim_config_filename)
         self.drone = Drone(self.client, self.world, "Drone1")     
 
         self.client.unsubscribe_all()
@@ -204,7 +208,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         return combined.flatten().astype(np.float32)
     
     def _rewards(self):
-        # TODO
+        # TODO Optimize reward function
         arrive_reward = 10.0
         crash_penalty = -20.0
 
@@ -269,9 +273,9 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         vy_norm = (self.state[State.vy] / self.maxv / 2 + 0.5) * 255
         vz_norm = (self.state[State.vz] / self.maxv / 2 + 0.5) * 255
 
-        dis_x_norm = (self.state[State.dis_x] / self.distance_x / 2 + 0.5) * 255
-        dis_y_norm = (self.state[State.dis_y] / self.distance_y / 2 + 0.5) * 255
-        dis_z_norm = (self.state[State.dis_z] / self.distance_z / 2 + 0.5) * 255
+        dis_x_norm = (self.state[State.dis_x] / max(self.distance_x, 1e-6) / 2 + 0.5) * 255
+        dis_y_norm = (self.state[State.dis_y] / max(self.distance_y, 1e-6) / 2 + 0.5) * 255
+        dis_z_norm = (self.state[State.dis_z] / max(self.distance_z, 1e-6) / 2 + 0.5) * 255
 
         relative_yaw_norm = (self.state[State.relative_yaw] / math.pi / 2 + 0.5) * 255
 
@@ -280,7 +284,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         return np.array([[vx_norm, vy_norm, vz_norm, dis_x_norm, dis_y_norm, dis_z_norm, relative_yaw_norm, angular_velocity_norm]])
 
     def normalize_image(self, depth_image):
-        image_scaled = np.clip(depth_image, 0, 15) / 15 * 255
+        image_scaled = np.clip(depth_image, 0, 50000) / 50000 * 255
         image_scaled = 255 - image_scaled
         image_uint8 = image_scaled.astype(np.uint8)
         # Extract features [low=0, high=255]
@@ -291,7 +295,12 @@ class ProjectAirSimSmallCityEnv(gym.Env):
 
     def random_target_point(self):
         # TODO Determine several feasible endpoints
-        return [7.0, 7.0, 7.0]
+        target_point_set = [
+            [50.0, -30.0, -10.0],
+            [125.0, 45.0, -5.0],
+            [-80.0, -120.0, -15.0],
+        ]
+        return random.choice(target_point_set)
 
     def _has_arrived(self):
         return math.sqrt(self.state[State.dis_x] ** 2 + self.state[State.dis_y] ** 2 + self.state[State.dis_z] ** 2) < self.goal_distance_threshold
