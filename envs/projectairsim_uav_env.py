@@ -10,6 +10,7 @@ from projectairsim.types import ImageType
 from projectairsim.utils import (
     load_scene_config_as_dict, 
     quaternion_to_rpy, 
+    projectairsim_log,
     )
 from envs.utils.type import (
     ActionType,
@@ -25,25 +26,16 @@ class ProjectAirSimSmallCityEnv(gym.Env):
 
         self.dv = 0.5
         self.maxv = 5
-        self.current_step = 0 
         self.max_episode_steps = 500
         self.target_point = self.random_target_point()
         self.goal_distance_threshold = 10.0
 
         self.loop = asyncio.get_event_loop()
 
-        # init the sim world and drone
         self.client = ProjectAirSimClient()
         self.client.connect()
         self.world = World(self.client, self.sim_config_filename)
-        self.drone = Drone(self.client, self.world, "Drone1")
 
-        self.client.subscribe(
-            self.drone.robot_info["collision_info"],
-            self._collision_callback,
-        )
-
-        # Init the image display windows
         self.image_display = ImageDisplay(
             num_subwin=3,
             screen_res_x=2560,
@@ -51,28 +43,15 @@ class ProjectAirSimSmallCityEnv(gym.Env):
             subwin_width=self.subwin_width,
             subwin_height=self.subwin_height
         )
-        chase_cam_window = "ChaseCam"
-        self.image_display.add_image(chase_cam_window, subwin_idx=0, resize_x=self.subwin_width, resize_y=self.subwin_height) 
-        self.client.subscribe(
-            self.drone.sensors["Chase"]["scene_camera"],
-            lambda _, msg: self.image_display.receive(msg, chase_cam_window),
-        )
+        self.image_display.start()
 
-        front_cam_window = "FrontCam"
-        self.image_display.add_image(front_cam_window,  subwin_idx=1, resize_x=self.subwin_width, resize_y=self.subwin_height)
-        self.client.subscribe(
-            self.drone.sensors["FrontCamera"]["scene_camera"],
-            lambda _, msg: self.image_display.receive(msg, front_cam_window),
-        )
+        self.chase_cam_window = "ChaseCam"
+        self.image_display.add_image(self.chase_cam_window, subwin_idx=0, resize_x=self.subwin_width, resize_y=self.subwin_height) 
+        self.front_cam_window = "FrontCam"
+        self.image_display.add_image(self.front_cam_window,  subwin_idx=1, resize_x=self.subwin_width, resize_y=self.subwin_height)
+        self.depth_name = "DepthImage"
+        self.image_display.add_image(self.depth_name, subwin_idx=2, resize_x=self.subwin_width, resize_y=self.subwin_height)
 
-        depth_name = "DepthImage"
-        self.image_display.add_image(depth_name, subwin_idx=2, resize_x=self.subwin_width, resize_y=self.subwin_height)
-        self.client.subscribe(
-            self.drone.sensors["front_center"]["depth_planar_camera"],
-            lambda _, msg: self.image_display.receive(msg, depth_name),
-        )
-
-        # 
         # 0 = vx
         # 1 = vy
         # 2 = vz
@@ -84,14 +63,6 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         # 8 = collision
         self.state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, False]
         assert len(self.state) == 9
-        self.update_state()
-
-        self.distance_x = self.state[State.dis_x]
-        self.distance_y = self.state[State.dis_y]
-        self.distance_z = self.state[State.dis_z]
-        self.total_dis = math.sqrt(self.distance_x **2 + self.distance_y **2 + self.distance_z **2)
-        self.previous_distance = self.total_dis
-        self.cur_distance = self.total_dis
 
         # The speed variation of North East Down South West Up and BRAKE
         self.action_space = gym.spaces.Discrete(7)  
@@ -105,47 +76,38 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         # The shape is (1, 8)
         self.observation_space = spaces.Box(low=0.0, high=255.0, shape=(16,), dtype=np.float32)
         
-        self.drone.enable_api_control()
-        self.drone.arm()
 
     """
         The reset() method must return a tuple (obs, info) 
     """
     def reset(self, *, seed=None, options=None):
-        # reset the world and drone
-        config_loaded, _ = load_scene_config_as_dict(
-            self.sim_config_filename, 
-            sim_config_path="sim_config/", 
-            sim_instance_idx=-1
-        )
-        self.world.load_scene(config_loaded, delay_after_load_sec=0)
-        self.drone = Drone(self.client, self.world, "Drone1")                
+        # reset the sim world and drone
+        self.drone = Drone(self.client, self.world, "Drone1")     
 
-        # resubscribe image display windows
-        chase_cam_window = "ChaseCam"
-        self.image_display.add_image(chase_cam_window, subwin_idx=0, resize_x=self.subwin_width, resize_y=self.subwin_height) 
+        self.client.unsubscribe_all()
+        self.client.subscribe(
+            self.drone.robot_info["collision_info"],
+            self._collision_callback,
+        )
+
+        # Init the image display windows
         self.client.subscribe(
             self.drone.sensors["Chase"]["scene_camera"],
-            lambda _, msg: self.image_display.receive(msg, chase_cam_window),
+            lambda _, msg: self.image_display.receive(msg, self.chase_cam_window),
         )
-
-        front_cam_window = "FrontCam"
-        self.image_display.add_image(front_cam_window,  subwin_idx=1, resize_x=self.subwin_width, resize_y=self.subwin_height)
         self.client.subscribe(
             self.drone.sensors["FrontCamera"]["scene_camera"],
-            lambda _, msg: self.image_display.receive(msg, front_cam_window),
+            lambda _, msg: self.image_display.receive(msg, self.front_cam_window),
         )
-
-        depth_name = "DepthImage"
-        self.image_display.add_image(depth_name, subwin_idx=2, resize_x=self.subwin_width, resize_y=self.subwin_height)
         self.client.subscribe(
             self.drone.sensors["front_center"]["depth_planar_camera"],
-            lambda _, msg: self.image_display.receive(msg, depth_name),
+            lambda _, msg: self.image_display.receive(msg, self.depth_name),
         )
 
         # reset state variables
         self.current_step = 0 
         self.target_point = self.random_target_point()
+
         self.update_state()
         self.distance_x = self.state[State.dis_x]
         self.distance_y = self.state[State.dis_y]
@@ -176,11 +138,13 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         done = self._is_terminal()
         truncated = self._is_truncated()
         info = {}
+        projectairsim_log().info(f"obs: {obs}")
+        projectairsim_log().info(f"reward: {reward}, done: {done}, truncated: {truncated}, info: {info}")
         return (obs, reward, done, truncated, info)
     
     async def _simulate(self, action):
         action = int(action)
-        print(f"Action taken: {ActionType.NUM2NAME[action]}")
+        projectairsim_log().info(f"Action taken: {ActionType.NUM2NAME[action]}")
         
         vx = float(self.state[State.vx]) * 0.9
         vy = float(self.state[State.vy]) * 0.9
@@ -213,11 +177,11 @@ class ProjectAirSimSmallCityEnv(gym.Env):
             vy = 0.0
             vz = 0.0
         
-        print(f"Velocity command: vx={vx}, vy={vy}, vz={vz}")
+        projectairsim_log().info(f"Velocity command: vx={vx}, vy={vy}, vz={vz}")
         
         # send velocity command to the drone
-        move_up_task = await self.drone.move_by_velocity_async(v_north=vx, v_east=vy, v_down=vz, duration=0.5)
-        await move_up_task     
+        move_task = await self.drone.move_by_velocity_async(v_north=vx, v_east=vy, v_down=vz, duration=0.5)
+        await move_task     
 
         self.update_state()
 
@@ -284,6 +248,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.state[State.dis_x] = abs(state["pose"]["position"]["x"] - self.target_point[0])
         self.state[State.dis_y] = abs(state["pose"]["position"]["y"] - self.target_point[1])
         self.state[State.dis_z] = abs(state["pose"]["position"]["z"] - self.target_point[2])
+        projectairsim_log().info(f"Position: x={state['pose']['position']['x']}, y={state['pose']['position']['y']}, z={state['pose']['position']['z']}")
 
         # relative_yaw = yaw − goal_yaw
         # [-pi, pi)
@@ -333,6 +298,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
 
 
     def _is_terminal(self):
+        projectairsim_log().info(f"Collison: {self.state[State.collision]}, arrived: {self._has_arrived()}")
         return bool((self.state[State.collision] or self._has_arrived()))
 
     def _is_truncated(self):
@@ -347,5 +313,8 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         return np.linalg.norm(p1 - p2)
     
     def close(self):
+        projectairsim_log().info(f"{self.__class__.__module__}.{self.__class__.__name__} is del")
+        self.drone.disarm()
+        self.drone.disable_api_control()
         self.client.disconnect()
         self.image_display.stop()
