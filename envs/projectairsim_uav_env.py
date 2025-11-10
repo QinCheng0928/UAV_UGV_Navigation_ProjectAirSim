@@ -112,6 +112,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.current_step = 0 
         self.target_point = self.random_target_point()
 
+        self.state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, False]
         self.update_state()
         self.distance_x = self.state[State.dis_x]
         self.distance_y = self.state[State.dis_y]
@@ -314,6 +315,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         return self.current_step >= self.max_episode_steps    
 
     def _collision_callback(self, topic=None, msg=None):
+        projectairsim_log().info("collision")
         self.state[State.collision] = True
 
     def distance_3d(self, p1, p2):

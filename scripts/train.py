@@ -6,9 +6,12 @@ MODULE_DIR = os.path.join(ROOT_DIR, "checkpoints")
 print(f"ROOT_DIR = {ROOT_DIR}")
 print(f"MODULE_DIR = {MODULE_DIR}")
 
+import logging
 from datetime import datetime
 from stable_baselines3 import PPO
 from envs.projectairsim_uav_env import ProjectAirSimSmallCityEnv
+from projectairsim.utils import projectairsim_log
+projectairsim_log().setLevel(logging.WARNING)
 
 current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
 os.makedirs(os.path.join(MODULE_DIR, current_time), exist_ok=True)
