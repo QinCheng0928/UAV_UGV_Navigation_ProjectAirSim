@@ -19,7 +19,7 @@ from envs.utils.type import (
     )
 
 class ProjectAirSimSmallCityEnv(gym.Env):
-    subwin_width, subwin_height = 640, 360
+    subwin_width, subwin_height = 320, 180
 
     def __init__(self):
         super().__init__()
@@ -40,7 +40,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.client.connect()
 
         self.image_display = ImageDisplay(
-            num_subwin=3,
+            num_subwin=7,
             screen_res_x=2560,
             screen_res_y=1440,
             subwin_width=self.subwin_width,
@@ -52,8 +52,17 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.image_display.add_image(self.chase_cam_window, subwin_idx=0, resize_x=self.subwin_width, resize_y=self.subwin_height) 
         self.front_cam_window = "FrontCam"
         self.image_display.add_image(self.front_cam_window,  subwin_idx=1, resize_x=self.subwin_width, resize_y=self.subwin_height)
-        self.depth_name = "DepthImage"
-        self.image_display.add_image(self.depth_name, subwin_idx=2, resize_x=self.subwin_width, resize_y=self.subwin_height)
+
+        self.front_depth_name = "FrontDepthImage"
+        self.image_display.add_image(self.front_depth_name, subwin_idx=2, resize_x=self.subwin_width, resize_y=self.subwin_height)
+        self.front_right_depth_image = "FrontRightDepthImage"
+        self.image_display.add_image(self.front_right_depth_image, subwin_idx=3, resize_x=self.subwin_width, resize_y=self.subwin_height) 
+        self.front_left_depth_image = "FrontLeftDepthImage"
+        self.image_display.add_image(self.front_left_depth_image,  subwin_idx=4, resize_x=self.subwin_width, resize_y=self.subwin_height)
+        self.bottom_depth_image = "BottomDepthImage"
+        self.image_display.add_image(self.bottom_depth_image, subwin_idx=5, resize_x=self.subwin_width, resize_y=self.subwin_height)
+        self.back_depth_image = "BackDepthImage"
+        self.image_display.add_image(self.back_depth_image, subwin_idx=6, resize_x=self.subwin_width, resize_y=self.subwin_height)
 
         # 0 = vx
         # 1 = vy
@@ -70,14 +79,16 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         # The speed variation of North East Down South West Up and BRAKE
         self.action_space = gym.spaces.Discrete(7)  
 
-        # We will first divide the image vertically into three parts, top, bottom, and middle, and take out the middle part
-        # Divide the middle image horizontally into eight parts and take the maximum value of each part as the feature vector of the observation space 
-        # Tth shape is (1, 8)
+        # We will first divide the image vertically into three parts, top, bottom, and middle, and take out every part
+        # Divide the image horizontally into eight parts and take the maximum value of each part as the feature vector of the observation space 
+        # The shape is (1, 24)
+        # We have four perspectives: front, rear, bottom, left, and right.
+        # The shape is (1, 24 * 5)
         # 
         # We also choose velocity in 3D space (vx vy, vz), distance from the endpoint (dis_x, dis_y, dis_z), 
         # relative heading angle, and angular velocity as features of the state
         # The shape is (1, 8)
-        self.observation_space = spaces.Box(low=0.0, high=255.0, shape=(16,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=0.0, high=255.0, shape=(24 * 5 + 8,), dtype=np.float32)
         
 
     """
@@ -100,12 +111,28 @@ class ProjectAirSimSmallCityEnv(gym.Env):
             lambda _, msg: self.image_display.receive(msg, self.chase_cam_window),
         )
         self.client.subscribe(
-            self.drone.sensors["FrontCamera"]["scene_camera"],
+            self.drone.sensors["front_center"]["scene_camera"],
             lambda _, msg: self.image_display.receive(msg, self.front_cam_window),
         )
         self.client.subscribe(
             self.drone.sensors["front_center"]["depth_planar_camera"],
-            lambda _, msg: self.image_display.receive(msg, self.depth_name),
+            lambda _, msg: self.image_display.receive(msg, self.front_depth_name),
+        )
+        self.client.subscribe(
+            self.drone.sensors["front_right"]["depth_planar_camera"],
+            lambda _, msg: self.image_display.receive(msg, self.front_right_depth_image),
+        )
+        self.client.subscribe(
+            self.drone.sensors["front_left"]["depth_planar_camera"],
+            lambda _, msg: self.image_display.receive(msg, self.front_left_depth_image),
+        )
+        self.client.subscribe(
+            self.drone.sensors["bottom_center"]["depth_planar_camera"],
+            lambda _, msg: self.image_display.receive(msg, self.bottom_depth_image),
+        )
+        self.client.subscribe(
+            self.drone.sensors["back_center"]["depth_planar_camera"],
+            lambda _, msg: self.image_display.receive(msg, self.back_depth_image),
         )
 
         # reset state variables
@@ -196,17 +223,24 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         state_feature = self.normalize_state()
 
         # Obtain and ormalizing depth image
-        result = self.drone.get_images("front_center", [ImageType.DEPTH_PLANAR])
-        depth_image = unpack_image(result[ImageType.DEPTH_PLANAR])
-        if depth_image.ndim == 3:
-            depth_image = depth_image[:, :, 0]
-        image_feature = self.normalize_image(depth_image)
+        camera_names = ["front_center", "front_right", "front_left", "bottom_center", "back_center"]
+        result_list = [self.drone.get_images(camera_name, [ImageType.DEPTH_PLANAR]) for camera_name in camera_names]
+        depth_image_list = [unpack_image(result[ImageType.DEPTH_PLANAR]) for result in result_list]
+        image_feature_list = []
+        for depth_image in depth_image_list:
+            if depth_image.ndim == 3:
+                depth_image = depth_image[:, :, 0]
+            image_feature_list.append(self.normalize_image(depth_image))
 
-        assert state_feature.shape[0] == 1 and state_feature.shape[1] == 8 
-        assert image_feature.shape[0] == 1 and image_feature.shape[1] == 8 
+        image_feature = np.hstack(image_feature_list)
+        image_feature = image_feature.astype(np.float32)
 
-        combined = np.concatenate((image_feature.flatten(), state_feature.flatten())) 
-        return combined.flatten().astype(np.float32)
+        assert state_feature.shape == (1, 8)
+        assert image_feature.shape == (1, 24 * len(camera_names))
+
+        combined_row = np.hstack([image_feature, state_feature])  # (1,128)
+        combined = combined_row.flatten().astype(np.float32)     # (128,)
+        return combined
     
     def _rewards(self):
         # TODO Optimize reward function
@@ -254,6 +288,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.state[State.dis_y] = abs(state["pose"]["position"]["y"] - self.target_point[1])
         self.state[State.dis_z] = abs(state["pose"]["position"]["z"] - self.target_point[2])
         projectairsim_log().info(f"Position: x={state['pose']['position']['x']}, y={state['pose']['position']['y']}, z={state['pose']['position']['z']}")
+        projectairsim_log().info(f"Dis: dis_x={self.state[State.dis_x]}, dis_y={self.state[State.dis_y]}, dis_z={self.state[State.dis_z]}")
 
         # relative_yaw = yaw − goal_yaw
         # [-pi, pi)
@@ -289,9 +324,8 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         image_scaled = 255 - image_scaled
         image_uint8 = image_scaled.astype(np.uint8)
         # Extract features [low=0, high=255]
-        middle = np.vsplit(image_uint8, 3)[1]
-        bands = np.hsplit(middle, 8)
-        split_image = [b.max() for b in bands]
+        rows = np.vsplit(image_uint8, 3)
+        split_image = [band.max() for row in rows for band in np.hsplit(row, 8)]
         return np.array([split_image], dtype=np.float32)
 
     def random_target_point(self):
@@ -301,7 +335,9 @@ class ProjectAirSimSmallCityEnv(gym.Env):
             [125.0, 45.0, -5.0],
             [-80.0, -120.0, -15.0],
         ]
-        return random.choice(target_point_set)
+        target = random.choice(target_point_set)
+        projectairsim_log().info(f"Target point: {target}")
+        return target
 
     def _has_arrived(self):
         return math.sqrt(self.state[State.dis_x] ** 2 + self.state[State.dis_y] ** 2 + self.state[State.dis_z] ** 2) < self.goal_distance_threshold

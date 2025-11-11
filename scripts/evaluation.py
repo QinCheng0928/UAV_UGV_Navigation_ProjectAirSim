@@ -2,7 +2,7 @@ import os
 import sys
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
-MODULE_DIR = os.path.join(ROOT_DIR, "checkpoints", "20251030_202615")
+MODULE_DIR = os.path.join(ROOT_DIR, "checkpoints", "20251110_135051")
 
 from stable_baselines3 import PPO
 from envs.projectairsim_uav_env import ProjectAirSimSmallCityEnv
@@ -10,7 +10,7 @@ from envs.projectairsim_uav_env import ProjectAirSimSmallCityEnv
 def main():
     env = ProjectAirSimSmallCityEnv()
     
-    model_name = "ppo_smallcity_20251030_202615.zip"
+    model_name = "ppo_smallcity_20251110_135051.zip"
     model = PPO.load(os.path.join(MODULE_DIR, model_name))
     
     for _ in range(5):

@@ -5,3 +5,5 @@
 tensorboard_log/ppo/
 
 **/media/
+
+**/checkpoints/
