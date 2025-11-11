@@ -17,7 +17,7 @@ def main():
         obs, info = env.reset()
         done = truncated = False
         while not (done or truncated):
-            action = 6
+            action = [0.5, 0.5, 0.5]
             obs, reward, done, truncated, info = env.step(action)
     env.close()
 

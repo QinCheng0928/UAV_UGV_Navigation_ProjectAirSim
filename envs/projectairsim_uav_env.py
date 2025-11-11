@@ -8,15 +8,12 @@ import asyncio
 from projectairsim import ProjectAirSimClient, Drone, World
 from projectairsim.image_utils import ImageDisplay, unpack_image
 from projectairsim.types import ImageType
+from projectairsim.drone import YawControlMode
 from projectairsim.utils import (
-    load_scene_config_as_dict, 
     quaternion_to_rpy, 
     projectairsim_log,
     )
-from envs.utils.type import (
-    ActionType,
-    State,
-    )
+from envs.utils.type import State
 
 class ProjectAirSimSmallCityEnv(gym.Env):
     subwin_width, subwin_height = 320, 180
@@ -25,7 +22,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         super().__init__()
         self.sim_config_filename = "scene_drone_classic.jsonc"
 
-        self.dv = 0.5
+        self.dt = 0.5
         self.maxv = 5
         self.max_episode_steps = 500
         self.target_point = self.random_target_point()
@@ -76,8 +73,11 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         self.state = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, False]
         assert len(self.state) == 9
 
-        # The speed variation of North East Down South West Up and BRAKE
-        self.action_space = gym.spaces.Discrete(7)  
+        # roll_rate, pitch_rate, yaw_rate
+        max_rate = 1.0  # rad/s, 可根据需要调大或调小
+        self.action_space = spaces.Box(low=np.array([-max_rate, -max_rate, -max_rate], dtype=np.float32),
+                                    high=np.array([ max_rate,  max_rate,  max_rate], dtype=np.float32),
+                                    dtype=np.float32)
 
         # We will first divide the image vertically into three parts, top, bottom, and middle, and take out every part
         # Divide the image horizontally into eight parts and take the maximum value of each part as the feature vector of the observation space 
@@ -175,30 +175,15 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         return (obs, reward, done, truncated, info)
     
     async def _simulate(self, action):
-        action = int(action)
-        projectairsim_log().info(f"Action taken: {ActionType.NUM2NAME[action]}")
-        
-        vx = float(self.state[State.vx]) * 0.9
-        vy = float(self.state[State.vy]) * 0.9
-        vz = float(self.state[State.vz]) * 0.9
-        
-        # update velocity based on action
-        if action == ActionType.NORTH:
-            vx += self.dv
-        elif action == ActionType.EAST:
-            vy += self.dv
-        elif action == ActionType.DOWN:
-            vz += self.dv
-        elif action == ActionType.SOUTH:
-            vx -= self.dv
-        elif action == ActionType.WEST:
-            vy -= self.dv
-        elif action == ActionType.UP:
-            vz -= self.dv
-        elif action == ActionType.BRAKE:
-            vx *= 0.5
-            vy *= 0.5
-            vz *= 0.5
+        projectairsim_log().info(f"Action taken: {action}")
+
+        roll = action[0]
+        pitch = action[1]
+        yaw = action[2]
+
+        vx = self.maxv * math.cos(yaw) * math.cos(pitch)
+        vy = self.maxv * math.sin(yaw) * math.cos(pitch)
+        vz = -self.maxv * math.sin(pitch)
 
         vx = np.clip(vx, -self.maxv, self.maxv)
         vy = np.clip(vy, -self.maxv, self.maxv)
@@ -212,7 +197,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         projectairsim_log().info(f"Velocity command: vx={vx}, vy={vy}, vz={vz}")
         
         # send velocity command to the drone
-        move_task = await self.drone.move_by_velocity_async(v_north=vx, v_east=vy, v_down=vz, duration=0.5)
+        move_task = await self.drone.move_by_velocity_async(v_north=vx, v_east=vy, v_down=vz, duration=0.5, yaw_control_mode = YawControlMode.ForwardOnly, yaw=0, yaw_is_rate=False)
         await move_task     
 
         self.update_state()
@@ -293,7 +278,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
         # relative_yaw = yaw − goal_yaw
         # [-pi, pi)
         orientation = state["pose"]["orientation"]
-        pitch, roll, yaw = quaternion_to_rpy(orientation["w"], orientation["x"], orientation["y"], orientation["z"])
+        roll, pitch, yaw = quaternion_to_rpy(orientation["w"], orientation["x"], orientation["y"], orientation["z"])
         goal_yaw = math.atan2(self.target_point[1] - state["pose"]["position"]["y"], self.target_point[0] - state["pose"]["position"]["x"])
         angle = yaw - goal_yaw
         self.state[State.relative_yaw] = (angle + math.pi) % (2*math.pi) - math.pi
