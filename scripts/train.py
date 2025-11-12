@@ -28,15 +28,15 @@ def main():
         learning_rate=5e-4,
         gamma=0.99,
         verbose=2,
-        device="cuda",
+        device="cpu",
         tensorboard_log=os.path.join(MODULE_DIR, current_time)
     )
-    model.learn(total_timesteps=int(1e5))
+    model.learn(total_timesteps=int(1e4))
     
     model_name = f"ppo_smallcity_{current_time}"
     save_path = os.path.join(MODULE_DIR, current_time, model_name)
     model.save(save_path)
-    
+    env.close()    
     
 if __name__ == "__main__":
     main()
