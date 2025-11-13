@@ -50,6 +50,9 @@ async def main():
             elif key == ord('q') or key == ord('Q'):
                 flying = False
                 vx, vy = 0, 0 
+            elif key == ord('b') or key == ord('B'):
+                kinematics = drone.get_ground_truth_kinematics()
+                print(f"Current kinematics: {kinematics}")
             else:
                 vx, vy = 0, 0
             
