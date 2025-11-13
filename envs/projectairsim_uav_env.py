@@ -382,7 +382,7 @@ class ProjectAirSimSmallCityEnv(gym.Env):
     def random_target_point(self):
         # TODO Determine several feasible endpoints
         target_point_set = [
-            [25.0, -15.0, -10.0],
+            [25.0, -5.0, -10.0],
             # [30.0, 2.0, -15.0],
         ]
         target = random.choice(target_point_set)
