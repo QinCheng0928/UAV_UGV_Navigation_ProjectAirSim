@@ -24,153 +24,98 @@ class Intersection:
         if target_id not in self.connections:
             self.connections.append(target_id)
 
+class Intersection:
+    id: str
+    x: float
+    y: float
+    z: float
+
+    def __init__(self, id, x, y, z):
+        self.id = id
+        self.x = x
+        self.y = y
+        self.z = z
+
+    @property
+    def coords(self):
+        return (self.x, self.y, self.z)
+
 class RoadNetwork:
-    z = -6
+    """Simple adjacency-list road network."""
+    def __init__(self, default_z = -6):
+        self._nodes = {}
+        self._adj = {}
+        self.default_z = default_z
 
+    def add_intersection(self, id, x, y, z = None) -> None:
+        z = self.default_z if z is None else z
+        self._nodes[id] = Intersection(id, x, y, z)
+        self._adj.setdefault(id, [])
+
+    def add_connection(self, a, b, bidirectional = True) -> None:
+        if a not in self._nodes or b not in self._nodes:
+            return
+        if b not in self._adj[a]:
+            self._adj[a].append(b)
+        if bidirectional and a not in self._adj[b]:
+            self._adj[b].append(a)
+
+    def neighbors(self, id):
+        return list(self._adj.get(id, []))
+
+    def random_neighbor(self, id):
+        neigh = self.neighbors(id)
+        return None if not neigh else np.random.choice(neigh).item()
+
+    def coords(self, id):
+        node = self._nodes.get(id)
+        return None if node is None else node.coords
+
+    def create_road_network(self) -> None:
+        # intersections (copied coordinates)
+        self.add_intersection("A",  129.2, -225.8)
+        self.add_intersection("B",  129.2, -160.0)
+        self.add_intersection("C",  129.3, -89.8 )
+        self.add_intersection("D",  128.2, -9.6  )
+        self.add_intersection("E",  133.1,  72.2 )
+        self.add_intersection("F",  139.6,  160.6)
+        self.add_intersection("G",  3.6  , -229.5)
+        self.add_intersection("H",  3.6  , -157.9)
+        self.add_intersection("I",  4.8  , -92.4 )
+        self.add_intersection("J",  6.0  , -9.6  )
+        self.add_intersection("K",  5.0  ,  72.2 )
+        self.add_intersection("L",  0.4  ,  160.6)
+        self.add_intersection("M", -125.0, -229.5)
+        self.add_intersection("N", -125.4, -156.1)
+        self.add_intersection("O", -125.4, -88.3 )
+        self.add_intersection("P", -125.4, -7.6  )
+        self.add_intersection("Q", -123.4,  72.2 )
+        self.add_intersection("R", -130.8,  160.6)
+        self.add_intersection("S", -252.7, -229.5)
+        self.add_intersection("T", -253.3, -162.3)
+        self.add_intersection("U", -253.3, -93.2 )
+        self.add_intersection("V", -253.3, -11.4 )
+        self.add_intersection("W", -253.3,  72.6 )
+        self.add_intersection("X", -253.3,  159.4)
+
+        # connections (bidirectional default)
+        edges = [
+            ("A","B"),("A","G"),("B","C"),("B","H"),("C","D"),("C","I"),("D","E"),("D","J"),
+            ("E","F"),("E","K"),("F","L"),("G","H"),("G","M"),("H","I"),("H","N"),("I","J"),
+            ("I","O"),("J","K"),("J","P"),("K","L"),("K","Q"),("L","R"),("M","N"),("M","S"),
+            ("N","O"),("N","T"),("O","P"),("O","U"),("P","Q"),("P","V"),("Q","R"),("Q","W"),
+            ("R","X"),("S","T"),("T","U"),("U","V"),("V","W"),("W","X")
+        ]
+        for a,b in edges:
+            self.add_connection(a,b)
+
+class CollisionState:
     def __init__(self):
-        self.intersections = {}
-    
-    def add_intersection(self, id, x, y, z):
-        self.intersections[id] = Intersection(id, x, y, z)
-    
-    def add_connection(self, from_id, to_id, bidirectional=True):
-        if from_id in self.intersections and to_id in self.intersections:
-            self.intersections[from_id].add_connection(to_id)
-            if bidirectional:
-                self.intersections[to_id].add_connection(from_id)
-    
-    def get_reachable_intersections_id(self, from_id):
-        return self.intersections[from_id].connections
-
-    def get_random_reachable_intersection_id(self, from_id):
-        reachable = self.intersections[from_id].connections
-        if not reachable:
-            return None
-        return random.choice(reachable)
-
-    def get_coordinates(self, id):
-        if id in self.intersections:
-            return self.intersections[id].coords
-        return None
-
-    def create_road_network(self):
-        # set the intersections and their coordinates
-        self.add_intersection("A",  129.2, -225.8, self.z)
-        self.add_intersection("B",  129.2, -160.0, self.z)
-        self.add_intersection("C",  129.3, -89.8 , self.z)
-        self.add_intersection("D",  128.2, -9.6  , self.z)
-        self.add_intersection("E",  133.1,  72.2 , self.z)
-        self.add_intersection("F",  139.6,  160.6, self.z)
-        self.add_intersection("G",  3.6  , -229.5, self.z)
-        self.add_intersection("H",  3.6  , -157.9, self.z)
-        self.add_intersection("I",  4.8  , -92.4 , self.z)
-        self.add_intersection("J",  6.0  , -9.6  , self.z)
-        self.add_intersection("K",  5.0  ,  72.2 , self.z)
-        self.add_intersection("L",  0.4  ,  160.6, self.z)
-        self.add_intersection("M", -125.0, -229.5, self.z)
-        self.add_intersection("N", -125.4, -156.1, self.z)
-        self.add_intersection("O", -125.4, -88.3 , self.z)
-        self.add_intersection("P", -125.4, -7.6  , self.z)
-        self.add_intersection("Q", -123.4,  72.2 , self.z)
-        self.add_intersection("R", -130.8,  160.6, self.z)
-        self.add_intersection("S", -252.7, -229.5, self.z)
-        self.add_intersection("T", -253.3, -162.3, self.z)
-        self.add_intersection("U", -253.3, -93.2 , self.z)
-        self.add_intersection("V", -253.3, -11.4 , self.z)
-        self.add_intersection("W", -253.3,  72.6 , self.z)
-        self.add_intersection("X", -253.3,  159.4, self.z)
-
-        # add connections between intersections
-        self.add_connection("A", "B")
-        self.add_connection("A", "G")
-        self.add_connection("B", "A")
-        self.add_connection("B", "C")
-        self.add_connection("B", "H")
-        self.add_connection("C", "B")
-        self.add_connection("C", "D")
-        self.add_connection("C", "I")
-        self.add_connection("D", "C")
-        self.add_connection("D", "E")
-        self.add_connection("D", "J")
-        self.add_connection("E", "D")
-        self.add_connection("E", "F")
-        self.add_connection("E", "K")
-        self.add_connection("F", "E")
-        self.add_connection("F", "L")
-
-        self.add_connection("G", "A")
-        self.add_connection("G", "H")
-        self.add_connection("G", "M")
-        self.add_connection("H", "B")
-        self.add_connection("H", "G")
-        self.add_connection("H", "I")
-        self.add_connection("H", "N")
-        self.add_connection("I", "C")
-        self.add_connection("I", "H")
-        self.add_connection("I", "J")
-        self.add_connection("I", "O")
-        self.add_connection("J", "D")
-        self.add_connection("J", "I")
-        self.add_connection("J", "K")
-        self.add_connection("J", "P")
-        self.add_connection("K", "E")
-        self.add_connection("K", "J")
-        self.add_connection("K", "L")
-        self.add_connection("K", "Q")
-        self.add_connection("L", "F")
-        self.add_connection("L", "K")
-        self.add_connection("L", "R")
-
-        self.add_connection("M", "G")
-        self.add_connection("M", "N")
-        self.add_connection("M", "S")
-        self.add_connection("N", "H")
-        self.add_connection("N", "M")
-        self.add_connection("N", "O")
-        self.add_connection("N", "T")
-        self.add_connection("O", "I")
-        self.add_connection("O", "N")
-        self.add_connection("O", "P")
-        self.add_connection("O", "U")
-        self.add_connection("P", "J")
-        self.add_connection("P", "O")
-        self.add_connection("P", "Q")
-        self.add_connection("P", "V")
-        self.add_connection("Q", "K")
-        self.add_connection("Q", "P")
-        self.add_connection("Q", "R")
-        self.add_connection("Q", "W")
-        self.add_connection("R", "L")
-        self.add_connection("R", "Q")
-        self.add_connection("R", "X")
-
-        self.add_connection("S", "M")
-        self.add_connection("S", "T")
-        self.add_connection("T", "N")
-        self.add_connection("T", "S")
-        self.add_connection("T", "U")
-        self.add_connection("U", "O")
-        self.add_connection("U", "T")
-        self.add_connection("U", "V")
-        self.add_connection("V", "P")
-        self.add_connection("V", "U")
-        self.add_connection("V", "W")
-        self.add_connection("W", "Q")
-        self.add_connection("W", "V")
-        self.add_connection("W", "X")
-        self.add_connection("X", "R")
-        self.add_connection("X", "W")
-
-class CollisonState:
-    def __init__(self):
-        self.collision = False
-
-    def set_collision(self, value):
-        self.collision = value
+        self.collision = False     
 
     def collision_callback(self, value):
         projectairsim_log().info("Exit because of collision.")
-        self.set_collision(value)
+        self.collision = value
 
 class Inspection:
     subwin_width, subwin_height = 640, 360
@@ -216,7 +161,7 @@ class Inspection:
         )
         self.image_display.start()
 
-        self._collison = CollisonState()
+        self._collison = CollisionState()
         self.client.subscribe(
             self.drone.robot_info["collision_info"],
             lambda topic, msg: self._collison.collision_callback(True),
@@ -238,23 +183,77 @@ class Inspection:
         # other states
         self.update_cur_position()
         self.from_position = self.cur_position
-        self.target_id = self.roadnetwork.get_random_reachable_intersection_id("J")
-        self.to_position = self.roadnetwork.get_coordinates(self.target_id)
+        self.target_id = self.roadnetwork.random_neighbor("J")
+        self.to_position = self.roadnetwork.coords(self.target_id)
 
         self.prev_v_north = 0.0
         self.prev_v_east = 0.0
         self.smoothing_factor = 0.3
 
     async def step(self):
-        v_north, v_east = self._action()
-        move_task = await self.drone.move_by_velocity_z_async(v_north, v_east, self.roadnetwork.z , 0.1, yaw_control_mode=YawControlMode.ForwardOnly, yaw_is_rate=False, yaw=0)
+        v_north, v_east, z = self._action()
+        move_task = await self.drone.move_by_velocity_z_async(v_north, v_east, z , 1, yaw_control_mode=YawControlMode.ForwardOnly, yaw_is_rate=False, yaw=0)
         await move_task
         self.update_cur_position()
 
     def _action(self):
-        if self.has_obstacles_ahead():
-            pass
+        move_velocity = 1.0
+
+        result = self.drone.get_images("front_center", [ImageType.DEPTH_PLANAR])
+        depth_image = unpack_image(result[ImageType.DEPTH_PLANAR])
+
+        middle = np.vsplit(depth_image, 3)[1]
+        bands = np.hsplit(middle, [200,400,600,800,1000,1200])
+        front_min = bands[len(bands) // 2].min() 
+        
+        if front_min < self.change_direction_distance_threshold:
+            projectairsim_log().info("Has obstacle.")
+            band_depths = [band.min() for band in bands]
+            
+            center_index = len(bands) // 2
+            left_index = center_index - 1
+            right_index = center_index + 1
+            
+            found_safe_direction = None
+            while left_index >= 0 or right_index < len(bands):
+                if right_index < len(bands) and band_depths[right_index] >= self.change_direction_distance_threshold:
+                    found_safe_direction = "right"
+                    safe_band_index = right_index
+                    break
+                
+                if left_index >= 0 and band_depths[left_index] >= self.change_direction_distance_threshold:
+                    found_safe_direction = "left"
+                    safe_band_index = left_index
+                    break
+                
+                right_index += 1
+                left_index -= 1
+            
+            if found_safe_direction:
+                projectairsim_log().info(f"Safe direction found: {found_safe_direction}, band index: {safe_band_index}")
+                total_bands = len(bands)
+                angle_per_band = (np.pi / 2) / total_bands
+                angle_offset = (safe_band_index - center_index) * angle_per_band
+                
+                yaw = quaternion_to_rpy(self.drone.get_ground_truth_kinematics()['pose']['orientation'])[-1]
+                abs_yaw = yaw + angle_offset
+                v_north = move_velocity * math.cos(abs_yaw)
+                v_east = move_velocity * math.sin(abs_yaw)              
+            else:
+                projectairsim_log().warning("No safe direction found! Executing backup strategy.")
+                safest_band_index = np.argmax(band_depths)
+                projectairsim_log().info(f"Choosing safest band: {safest_band_index} with depth: {band_depths[safest_band_index]:.2f}")
+                total_bands = len(bands)
+                angle_per_band = (np.pi / 2) / total_bands
+                angle_offset = (safest_band_index - center_index) * angle_per_band
+                
+                yaw = quaternion_to_rpy(self.drone.get_ground_truth_kinematics()['pose']['orientation'])[-1]
+                abs_yaw = yaw + angle_offset
+                v_north = move_velocity * math.cos(abs_yaw)  
+                v_east = move_velocity * math.sin(abs_yaw)
+
         else:
+            projectairsim_log().info("Without obstacle.")
             cur_x, cur_y, cur_z = self.cur_position
             to_x, to_y, to_z = self.to_position
             dx = to_x - cur_x
@@ -262,8 +261,7 @@ class Inspection:
             distance = math.sqrt(dx**2 + dy**2)
             unit_dx = dx / distance
             unit_dy = dy / distance
-                
-            move_velocity = 1.0
+                 
             v_north = unit_dx * move_velocity
             v_east = unit_dy * move_velocity
         
@@ -273,18 +271,7 @@ class Inspection:
         self.prev_v_north = v_north
         self.prev_v_east = v_east
 
-        return (v_north, v_east)
-
-    async def take_off(self):
-        takeoff_task = await self.drone.takeoff_async()
-        await takeoff_task
-        self.update_cur_position()
-        projectairsim_log().info("Take off completed.")
-
-    async def land(self):
-        land_task = await self.drone.land_async()
-        await land_task
-        projectairsim_log().info("Land completed.")
+        return (v_north, v_east, to_z)
 
     def update_cur_position(self):
         kinematics = self.drone.get_ground_truth_kinematics()
@@ -293,18 +280,8 @@ class Inspection:
         
     def update_from_and_to_position(self):
         self.from_position = self.cur_position
-        self.target_id = self.roadnetwork.get_random_reachable_intersection_id(self.target_id)
-        self.to_position = self.roadnetwork.get_coordinates(self.target_id)
-
-    def has_obstacles_ahead(self):
-        # this will return png width= 1280, height= 720
-        result = self.drone.get_images("front_center", [ImageType.DEPTH_PLANAR])
-        depth_image = unpack_image(result[ImageType.DEPTH_PLANAR])
-
-        middle = np.vsplit(depth_image, 3)[1]
-        bands = np.hsplit(middle, [100,200,300,400,500,600,700,800,900,1000,1100,1200])
-        assert len(bands) == 13
-        return bands[len(bands) // 2].min() < self.change_direction_distance_threshold
+        self.target_id = self.roadnetwork.random_neighbor(self.target_id)
+        self.to_position = self.roadnetwork.coords(self.target_id)
         
     def has_arrived(self):
         kinematics = self.drone.get_ground_truth_kinematics()
@@ -373,7 +350,9 @@ class Inspection:
 
     async def run(self):
         try:
-            await self.take_off()
+            takeoff_task = await self.drone.takeoff_async()
+            await takeoff_task
+            self.update_cur_position()
 
             while self._collison.collision == False:
                 await self.step()
@@ -381,10 +360,10 @@ class Inspection:
                     self.update_from_and_to_position()
                     projectairsim_log().info(f"New target intersection ID: {self.target_id}, coordinates: {self.to_position}")
         finally:
-            await self.land()
+            land_task = await self.drone.land_async()
+            await land_task
             self.close_all()
 
 if __name__ == "__main__":
     inspection_tast = Inspection()
     asyncio.run(inspection_tast.run())   
-
